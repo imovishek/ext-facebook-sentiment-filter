@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Sentiment Filter",
+  "version": "1.0",
+  "description": "Filter Facebook newsfeed based on sentiment and religious beliefs",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.facebook.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "host_permissions": [
+    "*://*.facebook.com/*",
+    "*://*.groq.com/*"
+  ]
+}

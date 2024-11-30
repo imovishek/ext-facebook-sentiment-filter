@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Facebook Sentiment Filter</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 10px;
+      font-family: Arial, sans-serif;
+    }
+    .section {
+      margin-bottom: 15px;
+    }
+    input, textarea {
+      width: 100%;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="section">
+    <h3>Belief Filters</h3>
+    <label>Include Beliefs:</label>
+    <textarea id="includeBeliefs" placeholder="Iskon, Hindu, Islam"></textarea>
+    
+    <label>Exclude Beliefs:</label>
+    <textarea id="excludeBeliefs" placeholder="Anti-religious, Controversial"></textarea>
+  </div>
+
+  <div class="section">
+    <h3>Sentiment Filters</h3>
+    <label>Minimum Sentiment Score (0-10):</label>
+    <input type="number" id="minSentiment" min="0" max="10" value="5">
+  </div>
+
+  <div class="section">
+    <h3>Post Handling</h3>
+    <label>
+      <input type="checkbox" id="minimizePosts"> Minimize Filtered Posts
+    </label>
+  </div>
+
+  <button id="saveSettings">Save Settings</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>
