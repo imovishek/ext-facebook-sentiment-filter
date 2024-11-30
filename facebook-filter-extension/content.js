@@ -15,56 +15,101 @@ function loadSettings() {
 }
 
 // Process text through Groq API
-async function analyzeText(text) {
+async function analyzeText(text, imageUrl = null) {
     if (!settings.groqApiKey) {
         console.error('Groq API key not set');
         return null;
     }
 
+    const includeBeliefs = settings.includeBeliefs?.split(',').map(b => b.trim().toLowerCase()) || [];
+    const excludeBeliefs = settings.excludeBeliefs?.split(',').map(b => b.trim().toLowerCase()) || [];
+
+
     try {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${settings.groqApiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: "mixtral-8x7b-32768",
-                messages: [{
-                    role: "user",
-                    content: `Analyze the following text and respond with ONLY a JSON object in this exact format, no other text:
-{
-    "religiousSentiment": "one of: [Iskon, Hindu, Islam, Secular, None]",
-    "sentimentScore": "number between 0-10",
-    "reason": "brief explanation"
-}
+        let data = {
+            excludesAllOfExcludedBeliefs: false,
+            includesAnyOfIncludedBeliefs: false,
+            sentimentScore: 0
+        }
+     
+        const retry_max = 5
+        for (let i = 0; i < retry_max; i++) {
+            try {
+                const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${settings.groqApiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: "llama-3.2-90b-vision-preview",
+                        messages: [{
+                            role: "user",
+                            content: `I am making a Facebook sentiment filter. I have a list of beliefs that I want to include and a list of beliefs that I want to exclude. Analyze the following post and first determine if it completely excludes "${excludeBeliefs.join(',')}" and then if it completely includes "${includeBeliefs.join(',')}" and respond with ONLY a JSON object in this exact format, no other text:
 
-Text to analyze: "${text.replace(/"/g, '\\"')}"`
-                }],
-                temperature: 0.3,
-                max_tokens: 150
-            })
-        });
+        {
+            "excludesAllOfExcludedBeliefs": boolean,
+            "includesAnyOfIncludedBeliefs": boolean,
+            "sentimentScore": number,
+            "reason": "The reasone why it was filtered"
+        }
 
-        const data = await response.json();
+        sentimentScore should be between 0 and 10 based on how much okay to show it to users.
+        Post to analyze: "${text.replace(/"/g, '\\"')}"`
+                        }, ...(imageUrl ? [{
+                            role: "user",
+                            content: [
+                                {
+                                    type: 'image_url',
+                                    image_url: {
+                                        "url": imageUrl
+                                    }
+                                }
+                            ]
+                        }] : [])],
+                        temperature: 0.3,
+                        max_tokens: 250
+                    })
+                });
+
+                data = await response.json();
+                if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
+                    break;
+                }
+            } catch (error) {
+                console.error('Error analyzing text:', error);
+                if (i < retry_max - 1) {
+                    console.log(`Retrying after ${i + 1} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, (i + 1) * 4 * 1000));
+                }
+            }
+            
+        }
         
-        if (!data.choices?.[0]?.message?.content) {
+        if (!data['choices'] || !data.choices[0] || !data.choices[0].message || !data.choices[0].message.content) {
             console.error('Invalid API response:', data);
             return null;
         }
 
         const content = data.choices[0].message.content.trim();
+        const json_string = content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1);  
         try {
-            const parsed = JSON.parse(content);
-            if (!parsed.religiousSentiment || !parsed.sentimentScore) {
-                console.error('Invalid JSON structure:', parsed);
+            // json starts with { and ends with }
+            console.log('Post Analysis:', content, json_string);
+            const parsed = JSON.parse(json_string);
+
+            console.log('Parsed JSON:', parsed);
+
+            if (parsed.excludesAllOfExcludedBeliefs === undefined || parsed.includesAnyOfIncludedBeliefs === undefined || parsed.sentimentScore === undefined) {
+                console.error('Invalid API response:', data);
                 return null;
             }
+             
             return parsed;
         } catch (parseError) {
             console.error('JSON Parse Error:', {
                 error: parseError,
-                content: content
+                content: json_string
             });
             return null;
         }
@@ -74,6 +119,10 @@ Text to analyze: "${text.replace(/"/g, '\\"')}"`
     }
 }
 
+cache = {
+
+}
+
 // Process a single post
 async function processPost(container, contentElement) {
     if (container.dataset.processed) return;
@@ -81,41 +130,57 @@ async function processPost(container, contentElement) {
 
     const textContent = contentElement.innerText.trim();
     if (!textContent) return;
+    let analysis = cache[textContent];
 
-    const analysis = await analyzeText(textContent);
+    if (!cache[textContent]) {
+        analysis = await analyzeText(textContent);
+        cache[textContent] = analysis;
+    }
+
     if (!analysis) return;
 
     if (!shouldShowPost(analysis)) {
+        console.log('Filtering post:', {textContent, analysis});
+
         contentElement.style.textDecoration = 'line-through';
-        contentElement.style.opacity = '0.7';
+        contentElement.style.opacity = '0.2';
+        contentElement.style.height = '40px';
         
         const reason = document.createElement('div');
-        reason.style.fontSize = '12px';
+        reason.style.fontSize = '14px';
         reason.style.color = '#65676B';
         reason.style.marginTop = '5px';
+        reason.style.backgroundColor = '#f5f6f7';
+        reason.style.padding = '10px';
+        reason.style.borderRadius = '5px';
         reason.textContent = `Filtered: ${analysis.reason || 'Does not match your preferences'}`;
+        // remove all next siblings
+        all_siblings = []
+        for (let i = contentElement.nextSibling; i; i = i.nextSibling) {
+            all_siblings.push(i)
+        }
+        for (let i = 0; i < all_siblings.length; i++) {
+            all_siblings[i].remove()
+        }
         contentElement.parentNode.insertBefore(reason, contentElement.nextSibling);
     }
 }
 
 // Determine if post should be shown based on settings
 function shouldShowPost(analysis) {
+   
+
+    if (analysis.excludesAllOfExcludedBeliefs) {
+            
+           return true;
+    }
     if (analysis.sentimentScore < settings.minSentiment) {
         return false;
     }
 
-    const includeBeliefs = settings.includeBeliefs?.split(',').map(b => b.trim().toLowerCase()) || [];
-    const excludeBeliefs = settings.excludeBeliefs?.split(',').map(b => b.trim().toLowerCase()) || [];
+   
 
-    const belief = analysis.religiousSentiment.toLowerCase();
-    
-    if (excludeBeliefs.includes(belief)) {
-        return false;
-    }
 
-    if (includeBeliefs.length > 0 && !includeBeliefs.includes(belief)) {
-        return false;
-    }
 
     return true;
 }
@@ -137,8 +202,10 @@ function processNewsFeed() {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === 1) {
                         const content = node.querySelector(story_message_selector);
+                        const image_url = node.querySelector('img')?.src;
+                        console.log("Image url:", image_url);
                         if (content) {
-                            processPost(node, content);
+                            processPost(node, content, image_url);
                         }
                     }
                 });
